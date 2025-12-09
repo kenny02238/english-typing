@@ -10,12 +10,13 @@ export function validateInput(
   userInput: string[],
   correctAnswer: string[]
 ): ValidationResult[] {
-  return userInput.map((word, index) => {
-    const correct = correctAnswer[index] || '';
-    const isCorrect = word.toLowerCase().trim() === correct.toLowerCase().trim();
+  // 確保為所有正確答案生成驗證結果，即使使用者沒有輸入
+  return correctAnswer.map((correct, index) => {
+    const userWord = userInput[index] || '';
+    const isCorrect = userWord.toLowerCase().trim() === correct.toLowerCase().trim() && userWord.trim() !== '';
     
     return {
-      word,
+      word: userWord,
       isCorrect,
       correctWord: correct,
     };

@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Exercise, UserPreferences, ValidationResult } from "@/types";
 import { validateInput, splitIntoWords, isAllCorrect } from "@/lib/validation";
 import { speechService } from "@/lib/speech";
+
+// 語速選項
+const SPEECH_RATES = [0.25, 0.5, 0.75, 1.0];
 
 export default function PracticePage() {
   const router = useRouter();
@@ -20,8 +23,19 @@ export default function PracticePage() {
   const [speechRate, setSpeechRate] = useState(1.0);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
+  // 檢測是否為 Mac（用於顯示正確的快捷鍵符號）
+  const isMac =
+    typeof window !== "undefined" &&
+    navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+  const cmdKey = isMac ? "⌘" : "Ctrl";
+
   // 初始化：讀取偏好設定並生成第一題
   useEffect(() => {
+    // 首次進入頁面時，先清空語音佇列
+    if (speechService) {
+      speechService.clearQueue();
+    }
+
     const prefsStr = sessionStorage.getItem("userPreferences");
     if (!prefsStr) {
       router.push("/");
@@ -30,7 +44,11 @@ export default function PracticePage() {
 
     const prefs = JSON.parse(prefsStr);
     setPreferences(prefs);
-    generateNewExercise(prefs);
+
+    // 等待一小段時間確保語音佇列已清空
+    setTimeout(() => {
+      generateNewExercise(prefs);
+    }, 200);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -54,17 +72,20 @@ export default function PracticePage() {
       const newExercise: Exercise = await response.json();
       setExercise(newExercise);
 
-      // 先停止所有播放，避免重複播放
+      // 先完全清空語音佇列，避免重複播放或殘留的語音
       if (speechService) {
-        speechService.stop();
+        speechService.clearQueue();
       }
 
-      // 自動播放第一個chunk
-      setTimeout(() => {
-        if (newExercise.chunks[0] && speechService) {
-          speechService.speak(newExercise.chunks[0], speechRate);
-        }
-      }, 500);
+      // 等待頁面渲染完成和語音服務初始化後再播放
+      // 使用 requestAnimationFrame 確保 DOM 已更新
+      requestAnimationFrame(() => {
+        setTimeout(async () => {
+          if (newExercise.chunks[0] && speechService) {
+            await speechService.speak(newExercise.chunks[0], speechRate);
+          }
+        }, 800); // 增加延遲時間，確保語音服務已準備好
+      });
     } catch (error) {
       console.error("生成題目錯誤:", error);
       alert("生成題目失敗，請重試");
@@ -72,6 +93,65 @@ export default function PracticePage() {
       setIsLoading(false);
     }
   };
+
+  // 處理語速切換
+  const increaseSpeed = useCallback(() => {
+    setSpeechRate((currentRate) => {
+      const currentIndex = SPEECH_RATES.indexOf(currentRate);
+      if (currentIndex < SPEECH_RATES.length - 1) {
+        return SPEECH_RATES[currentIndex + 1];
+      }
+      return currentRate;
+    });
+  }, []);
+
+  const decreaseSpeed = useCallback(() => {
+    setSpeechRate((currentRate) => {
+      const currentIndex = SPEECH_RATES.indexOf(currentRate);
+      if (currentIndex > 0) {
+        return SPEECH_RATES[currentIndex - 1];
+      }
+      return currentRate;
+    });
+  }, []);
+
+  // 處理全域快捷鍵
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMacKey = e.metaKey;
+      const isCtrlKey = e.ctrlKey;
+      const isModKey = isMacKey || isCtrlKey;
+
+      // Command/Ctrl + K：重聽（在輸入框內外都可用）
+      if ((e.key === "k" || e.key === "K") && isModKey) {
+        e.preventDefault();
+        if (exercise && speechService) {
+          const currentChunk = exercise.chunks[currentChunkIndex];
+          if (currentChunk) {
+            speechService.speak(currentChunk, speechRate);
+          }
+        }
+        return;
+      }
+
+      // Command/Ctrl + L：升速度（在輸入框內外都可用）
+      if ((e.key === "l" || e.key === "L") && isModKey) {
+        e.preventDefault();
+        increaseSpeed();
+        return;
+      }
+
+      // Command/Ctrl + J：降速度（在輸入框內外都可用）
+      if ((e.key === "j" || e.key === "J") && isModKey) {
+        e.preventDefault();
+        decreaseSpeed();
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [exercise, currentChunkIndex, speechRate, increaseSpeed, decreaseSpeed]);
 
   // 處理輸入變化
   const handleInputChange = (index: number, value: string) => {
@@ -93,6 +173,9 @@ export default function PracticePage() {
 
     const currentChunk = exercise.chunks[currentChunkIndex];
     const correctWords = splitIntoWords(currentChunk);
+
+    // 即使所有輸入框都為空，也要進行驗證並顯示結果
+    // 空輸入會被視為錯誤
     const results = validateInput(userInput, correctWords);
     setValidationResults(results);
 
@@ -114,11 +197,11 @@ export default function PracticePage() {
             }
 
             // 自動播放下一個chunk
-            setTimeout(() => {
+            setTimeout(async () => {
               if (nextChunk && speechService) {
-                speechService.speak(nextChunk, speechRate);
+                await speechService.speak(nextChunk, speechRate);
               }
-            }, 200);
+            }, 300);
 
             return nextIndex;
           });
@@ -135,12 +218,15 @@ export default function PracticePage() {
     }
   };
 
+  // 檢查是否已提交（有驗證結果）
+  const hasSubmitted = validationResults.length > 0;
+
   // 重聽按鈕
-  const handleRepeat = () => {
+  const handleRepeat = async () => {
     if (!exercise || !speechService) return;
     const currentChunk = exercise.chunks[currentChunkIndex];
     if (currentChunk) {
-      speechService.speak(currentChunk, speechRate);
+      await speechService.speak(currentChunk, speechRate);
     }
   };
 
@@ -223,13 +309,13 @@ export default function PracticePage() {
             <div className="flex gap-4">
               <button
                 onClick={handleContinue}
-                className="flex-1 py-4 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-lg font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all"
+                className="flex-1 py-4 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-lg font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all cursor-pointer"
               >
                 🔄 繼續練習
               </button>
               <button
                 onClick={handleGoHome}
-                className="px-6 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-xl transition-all"
+                className="px-6 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-xl transition-all cursor-pointer"
               >
                 🏠 返回首頁
               </button>
@@ -253,7 +339,7 @@ export default function PracticePage() {
               </span>
               <button
                 onClick={handleGoHome}
-                className="text-sm text-slate-500 hover:text-slate-700"
+                className="text-sm text-slate-500 hover:text-slate-700 cursor-pointer"
               >
                 🏠 返回首頁
               </button>
@@ -278,24 +364,65 @@ export default function PracticePage() {
             <div className="text-slate-400 text-lg mb-4">
               ({currentWords.length} 個單字)
             </div>
+            {/* 提交後顯示當前chunk的翻譯 */}
+            {hasSubmitted && exercise.chunkTranslations && (
+              <div className="mt-4 px-4 py-2 bg-slate-100 rounded-lg inline-block">
+                <div className="text-sm text-slate-600 mb-1">中文意思：</div>
+                <div className="text-lg font-semibold text-slate-800">
+                  {exercise.chunkTranslations[currentChunkIndex]}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 輸入格子 */}
           <div className="mb-8">
             <div className="flex flex-wrap gap-3 justify-center">
-              {currentWords.map((_, index) => {
+              {currentWords.map((word, index) => {
                 const result = validationResults[index];
                 const hasResult = result !== undefined;
                 const isCorrect = result?.isCorrect;
+                // 查找單字的中文意思（處理大小寫和標點符號）
+                const cleanWord = word.toLowerCase().replace(/[.,!?;:]/g, "");
+                const wordMeaningFull =
+                  exercise.wordMeanings[word] ||
+                  exercise.wordMeanings[word.toLowerCase()] ||
+                  exercise.wordMeanings[cleanWord] ||
+                  "";
+
+                // 解析詞性和中文意思：格式為 "中文意思 (詞性)"
+                let wordMeaning = "";
+                let partOfSpeech = "";
+                if (wordMeaningFull) {
+                  const match = wordMeaningFull.match(/^(.+?)\s*\((.+?)\)$/);
+                  if (match) {
+                    wordMeaning = match[1].trim();
+                    partOfSpeech = match[2].trim();
+                  } else {
+                    // 如果沒有詞性，只顯示中文意思
+                    wordMeaning = wordMeaningFull;
+                  }
+                }
 
                 return (
-                  <div key={index} className="flex flex-col">
+                  <div key={index} className="flex flex-col items-center">
+                    {/* 單字中文意思（提交後顯示在輸入框上方） */}
+                    {hasSubmitted && wordMeaning && (
+                      <div className="mb-1 text-xs text-slate-600 font-medium text-center min-h-4 px-1">
+                        {wordMeaning}
+                      </div>
+                    )}
+                    {hasSubmitted && !wordMeaning && (
+                      <div className="mb-1 text-xs text-slate-400 text-center min-h-4 px-1">
+                        &nbsp;
+                      </div>
+                    )}
                     <input
                       ref={(el) => {
                         inputRefs.current[index] = el;
                       }}
                       type="text"
-                      value={userInput[index] || ""}
+                      value={userInput[index] ?? ""}
                       onChange={(e) => handleInputChange(index, e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
@@ -308,14 +435,22 @@ export default function PracticePage() {
                           ? isCorrect
                             ? "border-green-500 bg-green-50 text-green-700"
                             : "border-red-500 bg-red-50 text-red-700"
-                          : "border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                          : "border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 text-slate-900"
                       }`}
-                      placeholder={`#${index + 1}`}
+                      placeholder={
+                        userInput[index] ? undefined : `${index + 1}`
+                      }
                       autoFocus={index === 0}
                     />
-                    {hasResult && !isCorrect && (
-                      <div className="mt-1 text-xs text-slate-500 text-center">
-                        正確: {result.correctWord}
+                    {/* 詞性（提交後顯示在輸入框下方） */}
+                    {hasSubmitted && partOfSpeech && (
+                      <div className="mt-1 text-xs text-slate-500 text-center min-h-4 italic">
+                        {partOfSpeech}
+                      </div>
+                    )}
+                    {hasSubmitted && !partOfSpeech && (
+                      <div className="mt-1 text-xs text-slate-400 text-center min-h-4">
+                        &nbsp;
                       </div>
                     )}
                   </div>
@@ -328,34 +463,78 @@ export default function PracticePage() {
           <div className="flex gap-4 mb-6">
             <button
               onClick={handleRepeat}
-              className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition-all"
+              className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition-all cursor-pointer"
             >
-              🔊 重聽
+              🔊 重聽 <span className="text-xs opacity-70">({cmdKey}+K)</span>
             </button>
             <button
               onClick={handleSubmit}
-              className="flex-1 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-all"
+              className="flex-1 py-3 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-all cursor-pointer"
             >
-              ✓ 提交 (Enter)
+              ✓ 提交 <span className="text-xs opacity-90">(Enter)</span>
             </button>
           </div>
 
           {/* 語速控制 */}
-          <div className="flex items-center justify-center gap-4 text-sm">
-            <span className="text-slate-600">語速:</span>
-            {[0.25, 0.5, 0.75, 1.0].map((rate) => (
-              <button
-                key={rate}
-                onClick={() => setSpeechRate(rate)}
-                className={`px-3 py-1 rounded transition-all ${
-                  speechRate === rate
-                    ? "bg-blue-500 text-white font-semibold"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
-              >
-                {rate === 1.0 ? "1x" : `${rate}x`}
-              </button>
-            ))}
+          <div className="mb-6">
+            <div className="flex items-center justify-center gap-4 text-sm mb-2">
+              <span className="text-slate-600 font-medium">語速:</span>
+              {SPEECH_RATES.map((rate) => (
+                <button
+                  key={rate}
+                  onClick={() => setSpeechRate(rate)}
+                  className={`px-3 py-1.5 rounded-md transition-all text-sm cursor-pointer ${
+                    speechRate === rate
+                      ? "bg-blue-500 text-white font-semibold shadow-sm"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {rate === 1.0 ? "1x" : `${rate}x`}
+                </button>
+              ))}
+            </div>
+            <div className="text-center text-xs text-slate-500">
+              <span>{cmdKey}+L</span>
+              <span className="mx-2">升速</span>
+              <span className="mx-1">·</span>
+              <span>{cmdKey}+J</span>
+              <span className="mx-2">降速</span>
+            </div>
+          </div>
+
+          {/* 快捷鍵提示 */}
+          <div className="mt-6 pt-6 border-t border-slate-200">
+            <div className="bg-slate-50 rounded-lg p-4">
+              <div className="flex flex-col gap-3">
+                <span className="font-semibold text-slate-700 text-center text-xs">
+                  ⌨️ 快捷鍵
+                </span>
+                <div className="flex items-center justify-between gap-4 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <kbd className="px-2.5 py-1 bg-white border border-slate-300 rounded-md text-slate-700 font-mono text-xs shadow-sm">
+                      Space
+                    </kbd>
+                    <span className="text-slate-600">下一格</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <kbd className="px-2.5 py-1 bg-white border border-slate-300 rounded-md text-slate-700 font-mono text-xs shadow-sm">
+                      {cmdKey}
+                    </kbd>
+                    <span className="text-slate-400">+</span>
+                    <kbd className="px-2.5 py-1 bg-white border border-slate-300 rounded-md text-slate-700 font-mono text-xs shadow-sm">
+                      K
+                    </kbd>
+                    <span className="text-slate-600">重聽</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <kbd className="px-2.5 py-1 bg-white border border-slate-300 rounded-md text-slate-700 font-mono text-xs shadow-sm">
+                      Enter
+                    </kbd>
+                    <span className="text-slate-600">提交</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
