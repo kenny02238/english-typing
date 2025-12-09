@@ -1,36 +1,162 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎯 AI 英文聽寫練習系統
 
-## Getting Started
+一個由 AI 驅動的英文聽寫練習工具，支援漸進式 chunk 練習、即時語音朗讀與智能糾錯。
 
-First, run the development server:
+## ✨ 功能特色
 
-```bash
+- 🤖 **AI 即時生題**：根據你的偏好（主題、難度、句長、句型）動態生成練習題目
+- 📝 **漸進式練習**：從小片段開始，逐步組成完整句子
+- 🔊 **語音朗讀**：自動播放英文，支援調整語速（0.7x ~ 1.2x）
+- ✅ **即時糾錯**：錯誤單字即時高亮顯示，並提供正確答案
+- 🌏 **完整解釋**：完成後顯示繁體中文翻譯與單字解釋
+- 🔄 **無限練習**：一題接一題，無限循環
+
+## 🚀 快速開始
+
+### 1. 申請 Groq API Key（免費）
+
+1. 前往 [console.groq.com](https://console.groq.com)
+2. 用 Google/GitHub 帳號登入
+3. 點擊「Create API Key」
+4. 複製你的 API Key
+
+**免費額度**：每天 14,400 次免費請求，個人使用完全足夠！
+
+### 2. 設定環境變數
+
+在專案根目錄編輯 `.env.local` 檔案：
+
+\`\`\`bash
+GROQ*API_KEY=你的 API_Key*在這裡
+\`\`\`
+
+### 3. 安裝依賴
+
+\`\`\`bash
+npm install
+\`\`\`
+
+### 4. 啟動開發伺服器
+
+\`\`\`bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+\`\`\`
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 5. 開始練習！
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+打開瀏覽器訪問 [http://localhost:3000](http://localhost:3000)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 📖 使用方式
 
-## Learn More
+### Step 1: 選擇條件
 
-To learn more about Next.js, take a look at the following resources:
+在首頁選擇你的練習偏好：
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **主題**：旅遊、餐廳、商務、日常等（可多選）
+- **句子長度**：短句(8-12 字)、中句(12-18 字)、長句(18 字以上)
+- **難度等級**：A1/A2/B1/B2/C1 (CEFR 標準)
+- **句型偏好**：介系詞、動名詞、被動語態等（可多選）
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Step 2: 聽寫練習
 
-## Deploy on Vercel
+系統會：
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. 自動播放英文（chunk 片段）
+2. 你在輸入框中逐字輸入
+3. 按 Enter 或點「提交」檢查答案
+4. 錯誤會標紅並顯示正確答案
+5. 全對後自動進入下一個 chunk
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Step 3: 查看結果
+
+完成整句後：
+
+- 顯示完整句子的中文翻譯
+- 顯示每個單字的解釋
+- 點「繼續練習」生成下一題
+
+## 🛠 技術架構
+
+- **框架**：Next.js 14 (App Router) + TypeScript
+- **AI 服務**：Groq (Llama 3.1 70B)
+- **語音**：Web Speech API
+- **樣式**：Tailwind CSS
+- **狀態管理**：React Hooks
+
+## 📁 專案結構
+
+\`\`\`
+/app
+/page.tsx # 條件選擇首頁
+/practice/page.tsx # 練習頁面
+/api/generate/route.ts # AI 生成題目 API
+/lib
+/groq.ts # Groq client
+/speech.ts # 語音朗讀功能
+/validation.ts # 輸入驗證邏輯
+/types
+/index.ts # TypeScript 類型定義
+\`\`\`
+
+## 💡 常見問題
+
+### Q: 為什麼選擇 Groq 而不是 OpenAI？
+
+A: Groq 的優勢：
+
+- ⚡️ **速度快 5-10 倍**：題目生成幾乎即時
+- 💰 **成本更低**：免費額度充足，付費也便宜
+- ✨ **品質足夠**：Llama 3.1 70B 對生成練習題目完全夠用
+
+### Q: 語音朗讀沒有聲音？
+
+A: Web Speech API 需要在瀏覽器中運行，確保：
+
+- 使用 Chrome/Edge 等現代瀏覽器
+- 允許網站播放聲音
+- 音量沒有靜音
+
+### Q: 可以離線使用嗎？
+
+A: 目前不行，因為需要呼叫 Groq API 生成題目。未來可以考慮整合 Ollama 實現本地 AI。
+
+### Q: 可以自訂題庫嗎？
+
+A: 目前所有題目都由 AI 即時生成，不需要題庫。如果你想練習特定句子，可以在程式碼中調整 prompt。
+
+## 🔧 自訂與擴展
+
+### 調整語速範圍
+
+編輯 `app/practice/page.tsx`：
+
+\`\`\`typescript
+{[0.7, 0.9, 1.0, 1.2].map(rate => (
+// 改成你想要的語速選項
+\`\`\`
+
+### 修改 prompt 策略
+
+編輯 `app/api/generate/route.ts` 中的 `buildPrompt` 函數。
+
+### 更換 AI 模型
+
+在 `app/api/generate/route.ts` 中：
+
+\`\`\`typescript
+model: 'llama-3.1-70b-versatile', // 改成其他 Groq 支援的模型
+\`\`\`
+
+## 📝 授權
+
+MIT License - 自由使用與修改
+
+## 🙏 致謝
+
+- [Groq](https://groq.com) - 提供高速 AI 推理
+- [Next.js](https://nextjs.org) - React 框架
+- [Tailwind CSS](https://tailwindcss.com) - CSS 框架
+
+---
+
+**祝你練習愉快！Have fun learning English! 🎉**
