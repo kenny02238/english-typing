@@ -13,7 +13,6 @@ export default function Home() {
   const [customSentence, setCustomSentence] = useState<string>('');
 
   const handleStartPractice = () => {
-    // 將偏好設定存到sessionStorage，讓練習頁面使用
     const prefsToSave: UserPreferences = {
       ...preferences,
       ...(customSentence.trim() && { customSentence: customSentence.trim() }),
@@ -22,18 +21,14 @@ export default function Home() {
     router.push('/practice');
   };
 
-  // 監聽 Enter 鍵
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 如果正在輸入框中，不處理
       if (e.target instanceof HTMLInputElement) {
         return;
       }
       
-      // 按 Enter 鍵觸發開始練習
       if (e.key === 'Enter') {
         e.preventDefault();
-        // 將偏好設定存到sessionStorage，讓練習頁面使用
         const prefsToSave: UserPreferences = {
           ...preferences,
           ...(customSentence.trim() && { customSentence: customSentence.trim() }),
@@ -50,7 +45,6 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-12 px-4">
       <div className="max-w-4xl mx-auto">
-        {/* 標題 */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-slate-800 mb-3">
             AI 英文聽寫練習
@@ -61,7 +55,6 @@ export default function Home() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg p-8 space-y-8">
-          {/* 主題輸入 */}
           <section>
             <h2 className="text-xl font-semibold text-slate-800 mb-4">
               📚 主題（選填）
@@ -78,7 +71,6 @@ export default function Home() {
             />
           </section>
 
-          {/* 句子長度 */}
           <section>
             <h2 className="text-xl font-semibold text-slate-800 mb-4">
               📏 句子長度
@@ -105,7 +97,6 @@ export default function Home() {
             </div>
           </section>
 
-          {/* 難度等級 */}
           <section>
             <h2 className="text-xl font-semibold text-slate-800 mb-4">
               🎯 難度等級（CEFR）
@@ -127,7 +118,6 @@ export default function Home() {
             </div>
           </section>
 
-          {/* 開始按鈕 */}
           <div className="pt-6">
             <button
               onClick={handleStartPractice}
@@ -144,7 +134,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 說明 */}
         <div className="mt-8 text-center text-slate-600 text-sm">
           <p>💡 提示：練習時會先讓你打小片段，再逐步組成完整句子</p>
         </div>

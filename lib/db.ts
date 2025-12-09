@@ -1,7 +1,6 @@
 import { sql } from '@vercel/postgres';
 import { Exercise, UserPreferences } from '@/types';
 
-// 初始化資料表（只需要執行一次）
 export async function initDatabase() {
   try {
     await sql`
@@ -33,13 +32,11 @@ export async function initDatabase() {
   }
 }
 
-// 儲存題目到資料庫
 export async function saveExercise(
   exercise: Exercise,
   preferences: UserPreferences
 ): Promise<boolean> {
   try {
-    // 檢查是否已存在相同題目
     const existing = await sql`
       SELECT id FROM exercises 
       WHERE sentence = ${exercise.sentence}
@@ -75,7 +72,6 @@ export async function saveExercise(
   }
 }
 
-// 從資料庫獲取隨機題目
 export async function getRandomExercise(
   preferences: UserPreferences
 ): Promise<Exercise | null> {
@@ -84,11 +80,8 @@ export async function getRandomExercise(
     const sentenceLength = preferences.sentenceLength || 'medium';
     const topics = preferences.topics || [];
 
-    // 構建查詢條件
     let result;
     
-    // 先查詢符合難度和長度的題目（不限制主題，因為主題匹配較複雜）
-    // 主題匹配可以在應用層處理，或使用更簡單的方式
     result = await sql`
       SELECT * FROM exercises 
       WHERE difficulty = ${difficulty}
@@ -103,14 +96,12 @@ export async function getRandomExercise(
 
     const row = result.rows[0];
 
-    // 更新使用次數
     await sql`
       UPDATE exercises 
       SET used_count = used_count + 1 
       WHERE id = ${row.id}
     `;
 
-    // 轉換為 Exercise 格式
     return {
       sentence: row.sentence,
       chunks: JSON.parse(row.chunks),
@@ -124,7 +115,6 @@ export async function getRandomExercise(
   }
 }
 
-// 獲取題目數量統計
 export async function getExerciseStats(): Promise<Record<string, number>> {
   try {
     const result = await sql`
@@ -146,7 +136,6 @@ export async function getExerciseStats(): Promise<Record<string, number>> {
   }
 }
 
-// 檢查題目是否存在
 export async function exerciseExists(
   sentence: string,
   difficulty: string,

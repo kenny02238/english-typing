@@ -2,7 +2,6 @@ import ai from '../lib/gemini';
 import { saveExercise, initDatabase, getExerciseStats } from '../lib/db';
 import { UserPreferences, Exercise } from '../types';
 
-// 從 route.ts 匯入 buildPrompt（需要複製過來或改為獨立模組）
 function buildPrompt(preferences: UserPreferences): string {
   const sentenceLength = preferences.sentenceLength || 'medium';
   const difficulty = preferences.difficulty || 'A2';
@@ -85,8 +84,7 @@ const TOPICS = [
   ['科技'],
 ];
 
-// 每種組合生成多少題（平均分配）
-const EXERCISES_PER_COMBINATION = 20; // 總共約 21 * 8 * 20 = 3,360 題
+const EXERCISES_PER_COMBINATION = 20;
 
 async function generateExercise(preferences: UserPreferences): Promise<Exercise | null> {
   try {
@@ -102,7 +100,21 @@ Return ONLY valid JSON, no markdown or explanations.`;
       contents: fullPrompt,
     });
 
-    const responseText = response?.text || response?.response?.text || "";
+    let responseText = "";
+    try {
+      if ((response as any)?.candidates?.[0]?.content?.parts?.[0]?.text) {
+        responseText = (response as any).candidates[0].content.parts[0].text;
+      } else if (typeof (response as any)?.text === 'string') {
+        responseText = (response as any).text;
+      }
+    } catch (e) {
+      console.error('解析回應錯誤:', e);
+      return null;
+    }
+    
+    if (!responseText) {
+      throw new Error("無法從 API 回應中提取文字內容");
+    }
     let jsonText = responseText.trim();
     
     const jsonMatch = jsonText.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/) || 
@@ -118,7 +130,6 @@ Return ONLY valid JSON, no markdown or explanations.`;
     
     const exercise: Exercise = JSON.parse(jsonText);
 
-    // 驗證格式
     if (
       !exercise.sentence ||
       !exercise.chunks ||
@@ -185,7 +196,6 @@ async function seedDatabase() {
               process.stdout.write(`\r進度: ${i + 1}/${EXERCISES_PER_COMBINATION} (已生成: ${generated}, 已儲存: ${saved}, 跳過: ${skipped})`);
             }
 
-            // 避免 rate limit，每次請求間隔 300ms（Gemini 免費額度較低）
             await new Promise(resolve => setTimeout(resolve, 300));
           } catch (error) {
             console.error(`\n錯誤:`, error);
@@ -202,7 +212,6 @@ async function seedDatabase() {
   console.log(`總儲存: ${totalSaved}`);
   console.log(`總跳過: ${totalSkipped}`);
 
-  // 顯示統計
   try {
     const stats = await getExerciseStats();
     console.log(`\n=== 題庫統計 ===`);
@@ -214,6 +223,5 @@ async function seedDatabase() {
   }
 }
 
-// 執行
 seedDatabase().catch(console.error);
 

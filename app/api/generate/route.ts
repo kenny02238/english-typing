@@ -3,13 +3,10 @@ import ai from "@/lib/gemini";
 import { UserPreferences, Exercise } from "@/types";
 import { getRandomExercise, saveExercise, exerciseExists } from "@/lib/db";
 
-// 生成 Mock 資料（當 API limit 觸發時使用）
 function generateMockExercise(preferences: UserPreferences): Exercise {
-  // 根據偏好設定生成不同難度的 mock 資料
   const sentenceLength = preferences.sentenceLength || 'medium';
   const difficulty = preferences.difficulty || 'A2';
 
-  // 預定義的 mock 句子（根據長度和難度）
   const mockSentences: Record<string, Record<string, Exercise>> = {
     short: {
       A1: {
@@ -156,17 +153,13 @@ function generateMockExercise(preferences: UserPreferences): Exercise {
     }
   };
 
-  // 選擇對應的 mock 資料，如果沒有精確匹配則使用最接近的
   let mockExercise: Exercise | undefined = mockSentences[sentenceLength]?.[difficulty];
   
-  // 如果沒有精確匹配，嘗試使用相同長度的其他難度
   if (!mockExercise && mockSentences[sentenceLength]) {
     const difficultyOrder = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'C3'];
     const currentIndex = difficultyOrder.indexOf(difficulty);
     
-    // 找最接近的難度（先往低難度找，再往高難度找）
     for (let offset = 1; offset < difficultyOrder.length; offset++) {
-      // 先嘗試較低的難度
       if (currentIndex - offset >= 0) {
         const lowerDifficulty = difficultyOrder[currentIndex - offset];
         if (mockSentences[sentenceLength][lowerDifficulty]) {
@@ -174,7 +167,6 @@ function generateMockExercise(preferences: UserPreferences): Exercise {
           break;
         }
       }
-      // 再嘗試較高的難度
       if (currentIndex + offset < difficultyOrder.length) {
         const higherDifficulty = difficultyOrder[currentIndex + offset];
         if (mockSentences[sentenceLength][higherDifficulty]) {
@@ -185,16 +177,13 @@ function generateMockExercise(preferences: UserPreferences): Exercise {
     }
   }
   
-  // 如果還是沒有，嘗試其他長度
   if (!mockExercise) {
-    // 優先使用 medium，然後 short，最後 long
     const fallbackLengths = ['medium', 'short', 'long'];
     for (const fallbackLength of fallbackLengths) {
       if (mockSentences[fallbackLength]?.[difficulty]) {
         mockExercise = mockSentences[fallbackLength][difficulty];
         break;
       }
-      // 如果該長度也沒有對應難度，找最接近的難度
       if (mockSentences[fallbackLength]) {
         const difficultyOrder = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'C3'];
         const currentIndex = difficultyOrder.indexOf(difficulty);
@@ -219,14 +208,11 @@ function generateMockExercise(preferences: UserPreferences): Exercise {
     }
   }
   
-  // 最後的 fallback：使用 medium A2 或 short A1
   if (!mockExercise) {
     mockExercise = mockSentences.medium?.A2 || mockSentences.short?.A1;
   }
 
-  // 確保返回有效的 mock 資料
   if (!mockExercise) {
-    // 如果所有 fallback 都失敗，返回一個最基本的 mock
     mockExercise = {
       sentence: "I love reading books",
       chunks: ["books", "reading books", "I love reading books"],
@@ -248,7 +234,6 @@ export async function POST(request: NextRequest) {
   try {
     const preferences: UserPreferences = await request.json();
     
-    // 驗證 preferences 格式
     if (!preferences || typeof preferences !== 'object') {
       throw new Error("無效的偏好設定格式");
     }
@@ -256,7 +241,6 @@ export async function POST(request: NextRequest) {
     const difficulty = preferences.difficulty || 'A2';
     const sentenceLength = preferences.sentenceLength || 'medium';
 
-    // 1. 優先從資料庫讀取
     try {
       const dbExercise = await getRandomExercise(preferences);
       if (dbExercise) {
@@ -265,22 +249,18 @@ export async function POST(request: NextRequest) {
       }
     } catch (dbError) {
       console.warn('資料庫讀取錯誤，繼續使用 AI:', dbError);
-      // 資料庫錯誤不阻斷，繼續嘗試 AI
     }
 
     console.log('資料庫沒有題目，調用 AI 生成');
 
-    // 2. 資料庫沒有，調用 AI 生成
     const prompt = buildPrompt(preferences);
 
-    // 組合 system message 和 user prompt（簡化版）
     const fullPrompt = `You are an English teacher. Create a typing practice exercise.
 
 ${prompt}
 
 Return ONLY valid JSON, no markdown or explanations.`;
 
-    // 呼叫 Google Gemini API
     let response;
     let exercise: Exercise;
     
@@ -290,13 +270,23 @@ Return ONLY valid JSON, no markdown or explanations.`;
         contents: fullPrompt,
       });
 
-      // 解析 Google Gemini 回應
-      const responseText = response?.text || response?.response?.text || "";
+      let responseText = "";
+      try {
+        if ((response as any)?.candidates?.[0]?.content?.parts?.[0]?.text) {
+          responseText = (response as any).candidates[0].content.parts[0].text;
+        } else if (typeof (response as any)?.text === 'string') {
+          responseText = (response as any).text;
+        }
+      } catch (e) {
+        console.error('解析回應錯誤:', e);
+      }
       
-      // 嘗試從回應中提取 JSON（可能包含 markdown 格式）
+      if (!responseText) {
+        throw new Error("無法從 API 回應中提取文字內容");
+      }
+      
       let jsonText = responseText.trim();
       
-      // 如果回應包含 markdown 代碼塊，提取 JSON 部分
       const jsonMatch = jsonText.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/) || 
                         jsonText.match(/(\{[\s\S]*\})/);
       
@@ -310,7 +300,6 @@ Return ONLY valid JSON, no markdown or explanations.`;
       
       exercise = JSON.parse(jsonText);
 
-      // 驗證回應格式
       if (
         !exercise.sentence ||
         !exercise.chunks ||
@@ -322,7 +311,6 @@ Return ONLY valid JSON, no markdown or explanations.`;
         throw new Error("AI回應格式不正確");
       }
 
-      // 3. 檢查是否重複並存入資料庫（非同步，不阻塞回應）
       exerciseExists(exercise.sentence, difficulty, sentenceLength)
         .then(exists => {
           if (!exists) {
@@ -340,11 +328,9 @@ Return ONLY valid JSON, no markdown or explanations.`;
       return NextResponse.json(exercise);
 
     } catch (geminiError: any) {
-      // 處理 Google Gemini API 的錯誤
       if (geminiError?.status === 429 || geminiError?.code === 'rate_limit_exceeded' || geminiError?.statusCode === 429) {
         console.warn("API rate limit 觸發，嘗試從資料庫讀取");
         
-        // 再次嘗試從資料庫讀取（可能剛才有新題目存入）
         try {
           const fallbackExercise = await getRandomExercise(preferences);
           if (fallbackExercise) {
@@ -355,60 +341,15 @@ Return ONLY valid JSON, no markdown or explanations.`;
           console.warn('資料庫 fallback 讀取失敗:', dbError);
         }
         
-        // 如果資料庫也沒有，使用 mock
         console.warn("資料庫也沒有題目，使用 mock 資料");
         const mockExercise = generateMockExercise(preferences);
         return NextResponse.json(mockExercise);
-        
-        // 如果需要顯示錯誤訊息（而不是使用 mock），取消註解以下代碼：
-        /*
-        const errorMessage = groqError?.error?.message || groqError?.message || '';
-        
-        // 嘗試從錯誤訊息中提取等待時間（秒數）
-        let retryAfterSeconds = 180; // 預設 3 分鐘
-        let retryAfterText = "3分鐘";
-        
-        const retryMatch = errorMessage.match(/try again in ([\d.]+s)/i) || 
-                          errorMessage.match(/(\d+)m(\d+\.?\d*)s/i);
-        if (retryMatch) {
-          if (retryMatch[2]) {
-            // 格式：3m7.488s
-            const minutes = parseInt(retryMatch[1]);
-            const seconds = Math.ceil(parseFloat(retryMatch[2]));
-            retryAfterSeconds = minutes * 60 + seconds;
-            retryAfterText = seconds > 0 ? `${minutes}分${seconds}秒` : `${minutes}分鐘`;
-          } else {
-            // 格式：3.488s
-            const seconds = Math.ceil(parseFloat(retryMatch[1]));
-            retryAfterSeconds = seconds;
-            retryAfterText = seconds < 60 ? `${seconds}秒` : `${Math.ceil(seconds / 60)}分鐘`;
-          }
-        }
-        
-        return NextResponse.json(
-          { 
-            error: `API 配額已用完，請稍後再試（約 ${retryAfterText}）`,
-            type: 'rate_limit',
-            retryAfter: retryAfterText,
-            retryAfterSeconds,
-            details: errorMessage
-          },
-          { 
-            status: 429,
-            headers: {
-              'Retry-After': retryAfterSeconds.toString() // HTTP header 必須是數字（秒數）
-            }
-          }
-        );
-        */
       }
-      // 重新拋出其他錯誤
       throw geminiError;
     }
   } catch (error: any) {
     console.error("生成題目錯誤:", error);
     
-    // 處理 Google Gemini API rate limit 錯誤
     if (error?.status === 429 || error?.statusCode === 429 || error?.code === 'rate_limit_exceeded') {
       const retryAfter = error?.retryAfter || error?.message?.match(/try again in ([\d.]+s)/)?.[1] || "幾分鐘";
       return NextResponse.json(
@@ -430,15 +371,12 @@ Return ONLY valid JSON, no markdown or explanations.`;
 }
 
 function buildPrompt(preferences: UserPreferences): string {
-  // 如果沒有選擇句子長度，隨機選擇一個
   const sentenceLength = preferences.sentenceLength || 
     (['short', 'medium', 'long'] as const)[Math.floor(Math.random() * 3)];
   
-  // 如果沒有選擇難度，隨機選擇一個
   const difficulty = preferences.difficulty || 
     (['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'C3'] as const)[Math.floor(Math.random() * 7)];
 
-  // 句子長度對應的字數範圍（簡化描述，AI 應該能理解）
   const lengthGuidelines: Record<string, { range: string; description: string }> = {
     short: {
       range: "5-8",
@@ -456,7 +394,6 @@ function buildPrompt(preferences: UserPreferences): string {
 
   const lengthGuideline = lengthGuidelines[sentenceLength];
 
-  // 主題描述：合併選擇的主題和自訂主題
   const allTopics = [...preferences.topics];
   if (preferences.customSentence?.trim()) {
     allTopics.push(preferences.customSentence.trim());
@@ -466,7 +403,6 @@ function buildPrompt(preferences: UserPreferences): string {
       ? `topics: ${allTopics.join(", ")}`
       : "any common topic";
 
-  // 難度等級說明（簡化，AI 應該理解 CEFR 標準）
   const difficultyGuidelines: Record<string, string> = {
     A1: "A1 (Beginner): Basic vocabulary, simple tenses, no complex grammar",
     A2: "A2 (Elementary): Common vocabulary, basic tenses, simple conjunctions",
