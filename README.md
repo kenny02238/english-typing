@@ -13,21 +13,21 @@
 
 ## 🚀 快速開始
 
-### 1. 申請 Groq API Key（免費）
+### 1. 申請 Gemini API Key（免費）
 
-1. 前往 [console.groq.com](https://console.groq.com)
-2. 用 Google/GitHub 帳號登入
+1. 前往 [Google AI Studio](https://makersuite.google.com/app/apikey)
+2. 用 Google 帳號登入
 3. 點擊「Create API Key」
 4. 複製你的 API Key
 
-**免費額度**：每天 14,400 次免費請求，個人使用完全足夠！
+**免費額度**：每天有免費額度，個人使用完全足夠！
 
 ### 2. 設定環境變數
 
 在專案根目錄編輯 `.env.local` 檔案：
 
 \`\`\`bash
-GROQ*API_KEY=你的 API_Key*在這裡
+GEMINI_API_KEY=你的_Gemini_API_Key
 \`\`\`
 
 ### 3. 安裝依賴
@@ -78,7 +78,7 @@ npm run dev
 ## 🛠 技術架構
 
 - **框架**：Next.js 14 (App Router) + TypeScript
-- **AI 服務**：Groq (Llama 3.1 70B)
+- **AI 服務**：Google Gemini 2.5 Flash
 - **語音**：Web Speech API
 - **樣式**：Tailwind CSS
 - **狀態管理**：React Hooks
@@ -91,7 +91,7 @@ npm run dev
 /practice/page.tsx # 練習頁面
 /api/generate/route.ts # AI 生成題目 API
 /lib
-/groq.ts # Groq client
+/gemini.ts # Gemini client
 /speech.ts # 語音朗讀功能
 /validation.ts # 輸入驗證邏輯
 /types
@@ -99,14 +99,6 @@ npm run dev
 \`\`\`
 
 ## 💡 常見問題
-
-### Q: 為什麼選擇 Groq 而不是 OpenAI？
-
-A: Groq 的優勢：
-
-- ⚡️ **速度快 5-10 倍**：題目生成幾乎即時
-- 💰 **成本更低**：免費額度充足，付費也便宜
-- ✨ **品質足夠**：Llama 3.1 70B 對生成練習題目完全夠用
 
 ### Q: 語音朗讀沒有聲音？
 
@@ -118,11 +110,11 @@ A: Web Speech API 需要在瀏覽器中運行，確保：
 
 ### Q: 可以離線使用嗎？
 
-A: 目前不行，因為需要呼叫 Groq API 生成題目。未來可以考慮整合 Ollama 實現本地 AI。
+A: 目前不行，因為需要呼叫 Gemini API 生成題目。未來可以考慮整合 Ollama 實現本地 AI。
 
 ### Q: 可以自訂題庫嗎？
 
-A: 目前所有題目都由 AI 即時生成，不需要題庫。如果你想練習特定句子，可以在程式碼中調整 prompt。
+A: 目前題目由 AI 即時生成，每次都會產生不同的題目。未來可以考慮加入題庫功能。
 
 ## 🔧 自訂與擴展
 
@@ -144,7 +136,7 @@ A: 目前所有題目都由 AI 即時生成，不需要題庫。如果你想練�
 在 `app/api/generate/route.ts` 中：
 
 \`\`\`typescript
-model: 'llama-3.1-70b-versatile', // 改成其他 Groq 支援的模型
+model: "gemini-2.5-flash", // 改成其他 Gemini 模型
 \`\`\`
 
 ## 📝 授權
@@ -153,7 +145,7 @@ MIT License - 自由使用與修改
 
 ## 🙏 致謝
 
-- [Groq](https://groq.com) - 提供高速 AI 推理
+- [Google Gemini](https://gemini.google.com) - 提供 AI 生成能力
 - [Next.js](https://nextjs.org) - React 框架
 - [Tailwind CSS](https://tailwindcss.com) - CSS 框架
 

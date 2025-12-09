@@ -79,32 +79,11 @@ export default function PracticePage() {
         const errorData = await response.json().catch(() => ({}));
         console.error("API 錯誤:", response.status, errorData);
 
-        if (response.status === 429 || errorData.type === "rate_limit") {
-          const retryAfterHeader = response.headers.get("retry-after");
-          let retryAfter = errorData.retryAfter || "幾分鐘";
-
-          if (retryAfterHeader) {
-            const totalSeconds = parseInt(retryAfterHeader);
-            if (!isNaN(totalSeconds)) {
-              const minutes = Math.floor(totalSeconds / 60);
-              const seconds = totalSeconds % 60;
-              if (minutes > 0 && seconds > 0) {
-                retryAfter = `${minutes}分鐘${seconds}秒`;
-              } else if (minutes > 0) {
-                retryAfter = `${minutes}分鐘`;
-              } else {
-                retryAfter = `${seconds}秒`;
-              }
-            }
-          }
-
-          throw new Error(`API 配額已用完，請稍後再試（約 ${retryAfter}）`);
-        }
-
-        throw new Error(
+        const errorMessage =
           errorData.error ||
-            `生成失敗: ${response.status} ${response.statusText}`
-        );
+          `生成失敗: ${response.status} ${response.statusText}`;
+
+        throw new Error(errorMessage);
       }
 
       const newExercise: Exercise = await response.json();
