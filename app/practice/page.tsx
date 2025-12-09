@@ -18,10 +18,12 @@ export default function PracticePage() {
   const [validationResults, setValidationResults] = useState<
     ValidationResult[]
   >([]);
-  const [showResult, setShowResult] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [speechRate, setSpeechRate] = useState(1.0);
+  const [showAnswer, setShowAnswer] = useState(false); // 是否顯示答案
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const hasInitialized = useRef(false); // 追蹤是否已經初始化
+  const isGeneratingRef = useRef(false); // 追蹤是否正在生成題目
 
   // 檢測是否為 Mac（用於顯示正確的快捷鍵符號）
   const isMac =
@@ -31,9 +33,16 @@ export default function PracticePage() {
 
   // 初始化：讀取偏好設定並生成第一題
   useEffect(() => {
+    // 防止重複初始化（React Strict Mode 會導致 useEffect 執行兩次）
+    if (hasInitialized.current) {
+      return;
+    }
+    hasInitialized.current = true;
+
     // 首次進入頁面時，先清空語音佇列
     if (speechService) {
       speechService.clearQueue();
+      speechService.stop(); // 停止任何正在播放的語音
     }
 
     const prefsStr = sessionStorage.getItem("userPreferences");
@@ -54,11 +63,18 @@ export default function PracticePage() {
 
   // 生成新題目
   const generateNewExercise = async (prefs: UserPreferences) => {
+    // 防止重複調用
+    if (isGeneratingRef.current) {
+      console.log("正在生成題目中，跳過重複調用");
+      return;
+    }
+
+    isGeneratingRef.current = true;
     setIsLoading(true);
-    setShowResult(false);
     setCurrentChunkIndex(0);
     setUserInput([]);
     setValidationResults([]);
+    setShowAnswer(false); // 重置答案顯示狀態
 
     try {
       const response = await fetch("/api/generate", {
@@ -67,14 +83,49 @@ export default function PracticePage() {
         body: JSON.stringify(prefs),
       });
 
-      if (!response.ok) throw new Error("生成失敗");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("API 錯誤:", response.status, errorData);
+
+        // 處理 rate limit 錯誤
+        if (response.status === 429 || errorData.type === "rate_limit") {
+          // 優先使用 header 中的 retry-after，否則使用錯誤訊息中的
+          const retryAfterHeader = response.headers.get("retry-after");
+          let retryAfter = errorData.retryAfter || "幾分鐘";
+
+          // 如果 header 中有 retry-after（秒數），轉換為 "x分鐘x秒" 格式
+          if (retryAfterHeader) {
+            const totalSeconds = parseInt(retryAfterHeader);
+            if (!isNaN(totalSeconds)) {
+              const minutes = Math.floor(totalSeconds / 60);
+              const seconds = totalSeconds % 60;
+              if (minutes > 0 && seconds > 0) {
+                retryAfter = `${minutes}分鐘${seconds}秒`;
+              } else if (minutes > 0) {
+                retryAfter = `${minutes}分鐘`;
+              } else {
+                retryAfter = `${seconds}秒`;
+              }
+            }
+          }
+
+          throw new Error(`API 配額已用完，請稍後再試（約 ${retryAfter}）`);
+        }
+
+        throw new Error(
+          errorData.error ||
+            `生成失敗: ${response.status} ${response.statusText}`
+        );
+      }
 
       const newExercise: Exercise = await response.json();
       setExercise(newExercise);
+      setIsLoading(false); // 立即設置載入完成，讓用戶看到內容
 
       // 先完全清空語音佇列，避免重複播放或殘留的語音
       if (speechService) {
-        speechService.clearQueue();
+        speechService.stop(); // 停止當前播放
+        speechService.clearQueue(); // 清空佇列
       }
 
       // 等待頁面渲染完成和語音服務初始化後再播放
@@ -88,9 +139,15 @@ export default function PracticePage() {
       });
     } catch (error) {
       console.error("生成題目錯誤:", error);
-      alert("生成題目失敗，請重試");
+      const errorMessage =
+        error instanceof Error ? error.message : "生成題目失敗，請重試";
+      alert(errorMessage);
+      // 如果生成失敗，跳轉回首頁
+      router.push("/");
     } finally {
+      // 無論成功或失敗，都要重置載入狀態和生成標記
       setIsLoading(false);
+      isGeneratingRef.current = false;
     }
   };
 
@@ -182,9 +239,28 @@ export default function PracticePage() {
     // 如果全對
     if (isAllCorrect(results)) {
       setTimeout(() => {
-        // 如果是最後一個chunk，顯示結果
+        // 如果是最後一個chunk，自動生成下一題
         if (currentChunkIndex === exercise.chunks.length - 1) {
-          setShowResult(true);
+          // 完成當前題目，自動生成下一題
+          if (preferences) {
+            // 確保 preferences 有必要的欄位
+            const prefsToUse: UserPreferences = {
+              topics: preferences.topics || [],
+              ...(preferences.sentenceLength && {
+                sentenceLength: preferences.sentenceLength,
+              }),
+              ...(preferences.difficulty && {
+                difficulty: preferences.difficulty,
+              }),
+              ...(preferences.customSentence && {
+                customSentence: preferences.customSentence,
+              }),
+            };
+            generateNewExercise(prefsToUse);
+          } else {
+            console.error("preferences 為 null，無法生成下一題");
+            alert("無法生成下一題，請返回首頁重新開始");
+          }
         } else {
           // 進入下一個chunk（使用函數式更新確保拿到最新值）
           setCurrentChunkIndex((prev) => {
@@ -208,6 +284,7 @@ export default function PracticePage() {
 
           setUserInput([]);
           setValidationResults([]);
+          setShowAnswer(false); // 關閉答案顯示，進入下一階段
 
           // 自動focus到第一個輸入框
           setTimeout(() => {
@@ -230,15 +307,13 @@ export default function PracticePage() {
     }
   };
 
-  // 繼續練習
-  const handleContinue = () => {
-    if (preferences) {
-      generateNewExercise(preferences);
-    }
+  // 切換答案顯示
+  const handleToggleAnswer = () => {
+    setShowAnswer((prev) => !prev);
   };
 
-  // 返回首頁
-  const handleGoHome = () => {
+  // 練習其他種類題目（返回首頁）
+  const handlePracticeOther = () => {
     router.push("/");
   };
 
@@ -266,66 +341,6 @@ export default function PracticePage() {
   const currentChunk = exercise.chunks[currentChunkIndex];
   const currentWords = splitIntoWords(currentChunk);
 
-  // 如果顯示結果（完成整句練習）
-  if (showResult) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-12 px-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-white rounded-2xl shadow-lg p-8">
-            {/* 完整句子 */}
-            <div className="text-center mb-8">
-              <div className="inline-block px-4 py-2 bg-green-100 text-green-700 rounded-full text-sm font-medium mb-4">
-                ✅ 完成！
-              </div>
-              <h2 className="text-3xl font-bold text-slate-800 mb-4">
-                {exercise.sentence}
-              </h2>
-              <p className="text-2xl text-slate-600">{exercise.translation}</p>
-            </div>
-
-            {/* 單字解釋 */}
-            <div className="mb-8">
-              <h3 className="text-xl font-semibold text-slate-800 mb-4">
-                📝 單字解釋
-              </h3>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {Object.entries(exercise.wordMeanings).map(
-                  ([word, meaning]) => (
-                    <div
-                      key={word}
-                      className="bg-slate-50 rounded-lg p-4 border border-slate-200"
-                    >
-                      <div className="font-semibold text-slate-800 mb-1">
-                        {word}
-                      </div>
-                      <div className="text-slate-600 text-sm">{meaning}</div>
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-
-            {/* 按鈕 */}
-            <div className="flex gap-4">
-              <button
-                onClick={handleContinue}
-                className="flex-1 py-4 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-lg font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all cursor-pointer"
-              >
-                🔄 繼續練習
-              </button>
-              <button
-                onClick={handleGoHome}
-                className="px-6 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-xl transition-all cursor-pointer"
-              >
-                🏠 返回首頁
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // 練習介面
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-12 px-4">
@@ -338,10 +353,10 @@ export default function PracticePage() {
                 Chunk {currentChunkIndex + 1} / {exercise.chunks.length}
               </span>
               <button
-                onClick={handleGoHome}
+                onClick={handlePracticeOther}
                 className="text-sm text-slate-500 hover:text-slate-700 cursor-pointer"
               >
-                🏠 返回首頁
+                🔄 練習其他種類題目
               </button>
             </div>
             <div className="w-full bg-slate-200 rounded-full h-2">
@@ -364,6 +379,19 @@ export default function PracticePage() {
             <div className="text-slate-400 text-lg mb-4">
               ({currentWords.length} 個單字)
             </div>
+
+            {/* 顯示當前chunk的答案 */}
+            {showAnswer && (
+              <div className="mb-4 px-6 py-4 bg-purple-50 border-2 border-purple-300 rounded-xl shadow-sm">
+                <div className="text-sm text-purple-600 mb-2 font-medium">
+                  答案：
+                </div>
+                <div className="text-2xl font-bold text-purple-900">
+                  {exercise.chunks[currentChunkIndex]}
+                </div>
+              </div>
+            )}
+
             {/* 提交後顯示當前chunk的翻譯 */}
             {hasSubmitted && exercise.chunkTranslations && (
               <div className="mt-4 px-4 py-2 bg-slate-100 rounded-lg inline-block">
@@ -466,6 +494,16 @@ export default function PracticePage() {
               className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition-all cursor-pointer"
             >
               🔊 重聽 <span className="text-xs opacity-70">({cmdKey}+K)</span>
+            </button>
+            <button
+              onClick={handleToggleAnswer}
+              className={`flex-1 py-3 font-medium rounded-lg transition-all cursor-pointer ${
+                showAnswer
+                  ? "bg-purple-500 hover:bg-purple-600 text-white"
+                  : "bg-purple-100 hover:bg-purple-200 text-purple-700"
+              }`}
+            >
+              {showAnswer ? "🙈 隱藏答案" : "👁️ 查看答案"}
             </button>
             <button
               onClick={handleSubmit}

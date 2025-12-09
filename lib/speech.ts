@@ -6,6 +6,7 @@ export class SpeechService {
   private pendingSpeak: { text: string; rate: number } | null = null;
   private speakTimeout: NodeJS.Timeout | null = null;
   private isInitialized: boolean = false;
+  private clearQueueInterval: NodeJS.Timeout | null = null; // 追蹤 clearQueue 的 interval
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -67,6 +68,43 @@ export class SpeechService {
     return this.isInitialized;
   }
 
+  // 強制重置 speechSynthesis 狀態（用於修復異常狀態）
+  private forceReset(): void {
+    if (!this.synth) return;
+    
+    try {
+      // 多次調用 cancel 來強制重置
+      this.synth.cancel();
+      this.synth.cancel();
+      
+      // 等待一小段時間讓狀態重置
+      setTimeout(() => {
+        if (this.synth) {
+          this.synth.cancel();
+        }
+      }, 100);
+    } catch (error) {
+      console.warn('強制重置語音服務時發生錯誤:', error);
+    }
+  }
+
+  // 檢查 speechSynthesis 是否處於異常狀態
+  private isStuck(): boolean {
+    if (!this.synth) return false;
+    
+    // 如果顯示正在播放或等待中，但實際上沒有 utterance，可能是卡住了
+    const isStuckState = (this.synth.speaking || this.synth.pending) && !this.currentUtterance;
+    
+    // 如果狀態持續超過 2 秒，也可能是卡住了
+    if (isStuckState) {
+      // 強制重置
+      this.forceReset();
+      return true;
+    }
+    
+    return false;
+  }
+
   // 朗讀文字
   async speak(text: string, rate: number = 0.9): Promise<void> {
     if (!this.synth) return;
@@ -75,6 +113,14 @@ export class SpeechService {
 
     // 確保語音服務已初始化
     await this.ensureInitialized();
+
+    // 檢查是否卡住
+    if (this.isStuck()) {
+      console.warn('語音服務可能卡住，嘗試重置...');
+      this.forceReset();
+      // 等待重置完成
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
 
     const trimmedText = text.trim();
 
@@ -95,7 +141,7 @@ export class SpeechService {
           this.pendingSpeak = null;
           this.speakTimeout = null;
         }
-      }, 150);
+      }, 200); // 稍微增加等待時間，確保狀態重置完成
       return;
     }
 
@@ -108,23 +154,39 @@ export class SpeechService {
     if (!this.synth) return;
 
     try {
+      // 先確保清空當前 utterance
+      if (this.currentUtterance) {
+        this.currentUtterance = null;
+      }
+
       this.currentUtterance = new SpeechSynthesisUtterance(text);
       this.currentUtterance.lang = 'en-US';
       this.currentUtterance.rate = Math.max(0.1, Math.min(rate, 2));
       this.currentUtterance.pitch = 1.0;
       this.currentUtterance.volume = 1.0;
 
+      this.currentUtterance.onstart = () => {
+        // 播放開始時清除 pending
+        this.pendingSpeak = null;
+      };
+
       this.currentUtterance.onend = () => {
         this.currentUtterance = null;
       };
 
-      this.currentUtterance.onerror = () => {
+      this.currentUtterance.onerror = (e) => {
+        console.warn('語音播放錯誤:', e.error, e.type);
         this.currentUtterance = null;
+        // 如果發生錯誤，強制重置
+        this.forceReset();
       };
 
       this.synth.speak(this.currentUtterance);
     } catch (error) {
+      console.error('播放語音時發生錯誤:', error);
       this.currentUtterance = null;
+      // 發生錯誤時強制重置
+      this.forceReset();
     }
   }
 
@@ -148,27 +210,42 @@ export class SpeechService {
   clearQueue(): void {
     if (!this.synth) return;
     
+    // 先清理之前的 interval（如果有的話）
+    if (this.clearQueueInterval) {
+      clearInterval(this.clearQueueInterval);
+      this.clearQueueInterval = null;
+    }
+    
     // 停止所有播放
     this.stop();
+    
+    // 強制重置狀態
+    this.forceReset();
     
     // 多次調用 cancel 確保清空所有佇列
     // 某些瀏覽器需要多次調用才能完全清空
     let attempts = 0;
-    const clearAttempts = setInterval(() => {
+    this.clearQueueInterval = setInterval(() => {
       if (this.synth) {
         this.synth.cancel();
         attempts++;
-        // 最多嘗試 5 次
-        if (attempts >= 5) {
-          clearInterval(clearAttempts);
+        // 最多嘗試 3 次（減少次數避免過度調用）
+        if (attempts >= 3) {
+          if (this.clearQueueInterval) {
+            clearInterval(this.clearQueueInterval);
+            this.clearQueueInterval = null;
+          }
         }
       }
-    }, 50);
+    }, 100); // 增加間隔時間
     
-    // 確保在 300ms 後停止嘗試
+    // 確保在 500ms 後停止嘗試
     setTimeout(() => {
-      clearInterval(clearAttempts);
-    }, 300);
+      if (this.clearQueueInterval) {
+        clearInterval(this.clearQueueInterval);
+        this.clearQueueInterval = null;
+      }
+    }, 500);
   }
 }
 
